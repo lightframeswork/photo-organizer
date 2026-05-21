@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1A1917">
+<title>Photo Organizer</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+/* === Reset & Base === */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #1A1917;
+  color: #E8E2D9;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* === CSS Variables === */
+:root {
+  --bg: #1A1917;
+  --surface: #242320;
+  --surface-hover: #2A2926;
+  --card: #1E1D1B;
+  --indigo: #5C7C9C;
+  --indigo-hover: #4A6B8A;
+  --wood: #8B7355;
+  --vermilion: #C75B3F;
+  --moss: #6B8E6B;
+  --text: #E8E2D9;
+  --text2: #A09888;
+  --border: rgba(232, 226, 217, 0.08);
+  --gold: #B8860B;
+  --gold-muted: rgba(184, 134, 11, 0.15);
+  --brown: #A07850;
+  --brown-muted: rgba(160, 120, 80, 0.15);
+}
+
+/* === App Shell === */
+#app { height: 100dvh; display: flex; flex-direction: column; }
+
+/* === Header === */
+.header {
+  padding: 16px 20px 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 100%);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  position: sticky;
+  top: env(safe-area-inset-top);
+  z-index: 10;
+}
+.header-top { display: flex; align-items: center; justify-content: space-between; }
+.header-title { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+.header-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+
+/* === Nav Tabs === */
+.nav-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(0,0,0,0.2);
+  border-radius: 10px;
+  margin: 12px 0 0;
+}
+.nav-tab {
+  flex: 1;
+  text-align: center;
+  padding: 8px 4px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.15s;
+  border: none;
+  background: none;
+  font-family: inherit;
+}
+.nav-tab.active { background: rgba(255,255,255,0.06); color: var(--text); }
+
+/* === Content Area === */
+.content { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+
+/* === Cards === */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.card-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text2);
+  margin-bottom: 12px;
+}
+
+/* === Buttons === */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+  -webkit-appearance: none;
+}
+.btn-primary { background: var(--indigo); color: var(--text); }
+.btn-primary:active { background: var(--indigo-hover); transform: scale(0.97); }
+.btn-secondary { background: rgba(232,226,217,0.06); color: var(--text2); }
+.btn-secondary:active { background: rgba(232,226,217,0.1); }
+.btn-success { background: var(--moss); color: white; }
+.btn-success:active { opacity: 0.85; transform: scale(0.97); }
+.btn-vermilion { background: var(--vermilion); color: white; }
+.btn-block { width: 100%; }
+.btn-sm { padding: 8px 14px; font-size: 12px; border-radius: 8px; }
+
+/* === Stats Grid === */
+.stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  text-align: center;
+}
+.stat-value { font-size: 26px; font-weight: 700; line-height: 1; }
+.stat-label { font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px; }
+
+/* === Camera Cards === */
+.camera-card {
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+.camera-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.camera-icon {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.camera-name { font-size: 15px; font-weight: 600; }
+.camera-model { font-size: 11px; color: var(--text2); }
+.camera-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.camera-stat { text-align: center; }
+.camera-stat-val { font-size: 16px; font-weight: 700; }
+.camera-stat-label { font-size: 9px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* Wear bar */
+.wear-bar { height: 4px; background: rgba(232,226,217,0.06); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+.wear-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+
+/* === Project Cards === */
+.project-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+.project-name { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.project-meta { font-size: 11px; color: var(--text2); display: flex; gap: 12px; flex-wrap: wrap; }
+.project-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.tag {
+  font-size: 10px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-weight: 500;
+}
+.tag-leica { color: var(--gold); background: var(--gold-muted); }
+.tag-fuji { color: var(--brown); background: var(--brown-muted); }
+.tag-indigo { color: var(--indigo); background: rgba(92,124,156,0.1); }
+
+/* === Tree Preview === */
+.tree-preview {
+  background: rgba(107,142,107,0.04);
+  border: 1px solid rgba(107,142,107,0.12);
+  border-radius: 12px;
+  padding: 14px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--text2);
+  overflow-x: auto;
+  white-space: pre;
+  margin: 12px 0;
+}
+.tree-preview .folder { color: var(--moss); }
+.tree-preview .file { color: var(--text); }
+.tree-preview .indent { color: rgba(160,152,136,0.3); }
+
+/* === Photo Grid === */
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 12px 0;
+}
+.photo-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+}
+.photo-card.selected { border-color: var(--indigo); background: rgba(92,124,156,0.06); }
+.photo-thumb {
+  width: 100%;
+  aspect-ratio: 4/3;
+  background: linear-gradient(135deg, #2E2C28, #242220);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
+.photo-thumb .placeholder { font-size: 22px; opacity: 0.2; }
+.photo-info { padding: 6px 2px 2px; }
+.photo-name { font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.photo-meta { font-size: 10px; color: var(--text2); margin-top: 2px; }
+.photo-check {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(26,25,23,0.8);
+  border: 2px solid rgba(232,226,217,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: transparent;
+  transition: all 0.15s;
+}
+.photo-card.selected .photo-check { background: var(--indigo); border-color: var(--indigo); color: white; }
+
+/* === Form Elements === */
+input[type="text"], select {
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 14px;
+  outline: none;
+  font-family: inherit;
+  -webkit-appearance: none;
+}
+input[type="text"]:focus, select:focus { border-color: var(--indigo); }
+
+.select-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.select-row select { flex: 1; }
+.select-row span { font-size: 12px; color: var(--text2); flex-shrink: 0; }
+
+/* === File Input === */
+.file-input-wrapper {
+  position: relative;
+  overflow: hidden;
+}
+.file-input-wrapper input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+/* === Progress === */
+.progress-container { margin: 16px 0; }
+.progress-bar { height: 6px; background: rgba(232,226,217,0.06); border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; background: linear-gradient(90deg, var(--indigo), var(--indigo-hover)); border-radius: 3px; transition: width 0.3s ease; }
+.progress-text { font-size: 12px; color: var(--text2); margin-top: 6px; text-align: center; }
+
+/* === Bottom Bar === */
+.bottom-bar {
+  position: sticky;
+  bottom: env(safe-area-inset-bottom);
+  background: rgba(26,25,23,0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid var(--border);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 10;
+}
+.bottom-bar .btn { flex: 1; }
+
+/* === Toast === */
+.toast-container {
+  position: fixed;
+  top: calc(16px + env(safe-area-inset-top));
+  left: 16px;
+  right: 16px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: white;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  animation: toastSlide 0.3s ease-out;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.toast.success { background: linear-gradient(135deg, #5A7D5A, var(--moss)); }
+.toast.info { background: linear-gradient(135deg, #4A6B8A, var(--indigo)); }
+.toast.error { background: linear-gradient(135deg, #A04030, var(--vermilion)); }
+@keyframes toastSlide {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* === Hidden === */
+.hidden { display: none !important; }
+
+/* === Empty State === */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text2);
+}
+.empty-state .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.3; }
+.empty-state h3 { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+.empty-state p { font-size: 13px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- Header -->
+  <div class="header">
+    <div class="header-top">
+      <div>
+        <div class="header-title">Photo Organizer</div>
+        <div class="header-sub">Project-based · 1 copy per photo</div>
+      </div>
+    </div>
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-tab="import">Import</button>
+      <button class="nav-tab" data-tab="dashboard">Dashboard</button>
+      <button class="nav-tab" data-tab="settings">Settings</button>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Content -->
+  <div class="content" id="content">
+
+    <!-- IMPORT TAB -->
+    <div id="tab-import">
+      <!-- Step 1: Select Photos -->
+      <div id="step-select">
+        <div class="file-input-wrapper btn btn-primary btn-block" style="margin-bottom: 16px;">
+          <input type="file" id="photoInput" multiple accept="image/*,.dng,.raf,.cr2,.cr3,.nef,.arw,.orf,.rw2">
+          <span>📷 Select Photos from Library</span>
+        </div>
+        <div class="empty-state">
+          <div class="icon">📁</div>
+          <h3>Import Your Photos</h3>
+          <p>Select photos from your camera roll, SD card reader, or Files app. The organizer will read EXIF metadata and create a clean project structure.</p>
+        </div>
+      </div>
+
+      <!-- Step 2: Configure -->
+      <div id="step-config" class="hidden">
+        <div class="card">
+          <div class="card-title">Project</div>
+          <input type="text" id="projectName" placeholder="e.g. Japan 2026" value="">
+          <div style="font-size: 11px; color: var(--text2); margin-top: 6px;">Auto-suggested from photo dates</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Organization</div>
+          <div class="select-row">
+            <select id="primaryGroup">
+              <option value="date">Group by Date</option>
+              <option value="camera">Group by Camera</option>
+              <option value="location">Group by Location</option>
+              <option value="none">No grouping</option>
+            </select>
+            <span>then</span>
+            <select id="secondaryGroup">
+              <option value="camera">by Camera</option>
+              <option value="date">by Date</option>
+              <option value="lens">by Lens</option>
+              <option value="none">none</option>
+            </select>
+          </div>
+          <div id="presetBadge" style="display:inline-block; font-size:10px; padding:3px 10px; border-radius:20px; margin-top:8px; color: var(--indigo); background: rgba(92,124,156,0.1);">Preset: Project + Date + Camera</div>
+        </div>
+
+        <div class="tree-preview" id="treePreview">Select photos to see preview...</div>
+
+        <div id="photoCount" style="font-size: 12px; color: var(--text2); margin-bottom: 12px;"></div>
+
+        <div class="photo-grid" id="photoGrid"></div>
+      </div>
+
+      <!-- Step 3: Processing -->
+      <div id="step-process" class="hidden">
+        <div class="empty-state">
+          <div class="icon">📦</div>
+          <h3>Organizing Photos...</h3>
+          <div class="progress-container">
+            <div class="progress-bar"><div class="progress-fill" id="processBar" style="width: 0%"></div></div>
+            <div class="progress-text" id="processText">Reading EXIF metadata...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4: Done -->
+      <div id="step-done" class="hidden">
+        <div class="empty-state">
+          <div class="icon" style="opacity: 1; font-size: 56px;">✅</div>
+          <h3>Organization Complete!</h3>
+          <p id="doneText"></p>
+          <button class="btn btn-primary btn-block" style="margin-top: 20px;" id="downloadBtn">
+            📥 Download Organized ZIP
+          </button>
+          <button class="btn btn-secondary btn-block" style="margin-top: 10px;" onclick="app.reset()">
+            Organize More Photos
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DASHBOARD TAB -->
+    <div id="tab-dashboard" class="hidden">
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-value" style="color: var(--indigo);" id="dashPhotos">0</div><div class="stat-label">Photos</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: var(--wood);" id="dashCameras">0</div><div class="stat-label">Cameras</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: var(--moss);" id="dashProjects">0</div><div class="stat-label">Projects</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: var(--vermilion);" id="dashThisMonth">0</div><div class="stat-label">This Month</div></div>
+      </div>
+
+      <div class="card-title" style="margin-bottom: 10px;">Your Cameras</div>
+      <div id="cameraList"></div>
+
+      <div class="card-title" style="margin: 20px 0 10px;">Recent Projects</div>
+      <div id="projectList"></div>
+    </div>
+
+    <!-- SETTINGS TAB -->
+    <div id="tab-settings" class="hidden">
+      <div class="card">
+        <div class="card-title">Quick Presets</div>
+        <div id="presetList"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Default Organization</div>
+        <div class="select-row">
+          <select id="defaultPrimary">
+            <option value="date">Group by Date</option>
+            <option value="camera">Group by Camera</option>
+            <option value="location">Group by Location</option>
+            <option value="none">Flat (no grouping)</option>
+          </select>
+          <span>then</span>
+          <select id="defaultSecondary">
+            <option value="camera">by Camera</option>
+            <option value="date">by Date</option>
+            <option value="lens">by Lens</option>
+            <option value="none">none</option>
+          </select>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">About</div>
+        <p style="font-size: 12px; color: var(--text2); line-height: 1.6;">
+          Photo Organizer reads EXIF metadata from your photos and creates a single clean project folder structure.
+          All processing happens on your device — photos are never uploaded to any server.
+          Export the organized ZIP to iCloud Drive, Dropbox, or any cloud storage.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Bar (Import tab only) -->
+  <div class="bottom-bar hidden" id="bottomBar">
+    <button class="btn btn-secondary btn-sm" id="selectAllBtn" onclick="app.selectAll()">All</button>
+    <button class="btn btn-secondary btn-sm" id="deselectAllBtn" onclick="app.deselectAll()">None</button>
+    <div style="flex: 1; text-align: center; font-size: 12px; color: var(--text2);">
+      <span id="selectedCount">0</span> selected
+    </div>
+    <button class="btn btn-success btn-sm" id="organizeBtn" onclick="app.organize()">Organize</button>
+  </div>
+</div>
+
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/exifreader@4.23.3/dist/exif-reader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
