@@ -1,7 +1,7 @@
 {
   "name": "Photo Organizer",
   "short_name": "PhotoOrg",
-  "description": "Organize photos by EXIF metadata - project-based, 1 copy per photo",
+  "description": "Organize photos & videos by EXIF metadata - project-based, 1 copy per file",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#1A1917",

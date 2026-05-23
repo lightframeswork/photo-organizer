@@ -1,18 +1,20 @@
 /**
  * Photo Organizer - iOS/Web PWA
- * Client-side EXIF reading, project-based organization, ZIP export
+ * Client-side EXIF reading for photos, file-date for videos,
+ * project-based organization, ZIP export
+ * Supports: photos (RAW/JPEG) + videos (MP4/MOV/M4V)
  */
 
 // ===================== STATE =====================
 const state = {
-  photos: [],          // { id, file, name, meta: { camera, lens, focal, aperture, iso, date, shutterCount, serial, gps } }
+  photos: [],          // { id, file, name, type: 'image'|'video', size, meta, thumb }
   selected: new Set(),
   cameras: [],         // { id, model, make, nickname, shutterCount, importedFiles, color }
-  projects: [],        // { id, name, date, photos, cameras, days }
+  projects: [],        // { id, name, date, photos, videos, cameras, days }
   primary: 'date',
   secondary: 'camera',
   projectName: '',
-  step: 'select',      // select | config | process | done
+  step: 'select',
 };
 
 const PRESETS = {
@@ -31,11 +33,13 @@ const COLORS = {
   Sony: { gold: '#5C7C9C', muted: 'rgba(92,124,156,0.15)' },
 };
 
-// ===================== DOM =====================
+// Supported extensions
+const IMAGE_EXTS = /\.(jpe?g|png|tiff?|bmp|webp|dng|raf|cr2|cr3|nef|arw|orf|rw2|raw)$/i;
+const VIDEO_EXTS = /\.(mp4|mov|m4v|avi|mkv|wmv|flv|webm|mts|m2ts)$/i;
+
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
-// ===================== INIT =====================
 function init() {
   loadState();
   setupTabs();
@@ -65,26 +69,36 @@ function setupTabs() {
 function setupFileInput() {
   $('#photoInput').addEventListener('change', async (e) => {
     const files = Array.from(e.target.files).filter(f =>
-      f.type.startsWith('image/') || /\.(dng|raf|cr2|cr3|nef|arw|orf|rw2)$/i.test(f.name)
+      f.type.startsWith('image/') ||
+      f.type.startsWith('video/') ||
+      IMAGE_EXTS.test(f.name) ||
+      VIDEO_EXTS.test(f.name)
     );
     if (!files.length) return;
 
+    // Separate images and videos for stats
+    const images = files.filter(f => f.type.startsWith('image/') || IMAGE_EXTS.test(f.name));
+    const videos = files.filter(f => f.type.startsWith('video/') || VIDEO_EXTS.test(f.name));
+
     showStep('process');
-    toast(`Reading ${files.length} photos...`, 'info');
+    toast(`Reading ${files.length} files (${images.length} photos, ${videos.length} videos)...`, 'info');
 
     state.photos = [];
     const total = files.length;
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      updateProgress(Math.round(((i + 0.5) / total) * 50), `Reading ${file.name}...`);
+      const isVideo = file.type.startsWith('video/') || VIDEO_EXTS.test(file.name);
+      updateProgress(Math.round(((i + 0.5) / total) * 50),
+        isVideo ? `Reading video: ${file.name}...` : `Reading photo: ${file.name}...`);
 
       try {
-        const meta = await readExif(file);
+        const meta = isVideo ? await readVideoMeta(file) : await readExif(file);
         state.photos.push({
           id: i,
           file,
           name: file.name,
+          type: isVideo ? 'video' : 'image',
           size: formatSize(file.size),
           meta,
           thumb: null,
@@ -94,15 +108,20 @@ function setupFileInput() {
           id: i,
           file,
           name: file.name,
+          type: isVideo ? 'video' : 'image',
           size: formatSize(file.size),
-          meta: { camera: 'Unknown', cameraMake: '', lens: '', focalLength: '', aperture: '', iso: '', date: '', shutterCount: 0, serial: '', gps: '' },
+          meta: makeUnknownMeta(),
           thumb: null,
         });
       }
 
       // Generate thumbnail
       try {
-        state.photos[i].thumb = await generateThumbnail(file);
+        if (isVideo) {
+          state.photos[i].thumb = await generateVideoThumbnail(file);
+        } else {
+          state.photos[i].thumb = await generateThumbnail(file);
+        }
       } catch (_) { /* ignore */ }
     }
 
@@ -115,11 +134,17 @@ function setupFileInput() {
     updateSelectedCount();
     $('#bottomBar').classList.remove('hidden');
 
-    toast(`Loaded ${state.photos.length} photos`, 'success');
+    const imgCount = state.photos.filter(p => p.type === 'image').length;
+    const vidCount = state.photos.filter(p => p.type === 'video').length;
+    toast(`Loaded ${imgCount} photos, ${vidCount} videos`, 'success');
   });
 }
 
-// ===================== EXIF READING =====================
+function makeUnknownMeta() {
+  return { camera: 'Unknown', cameraMake: '', lens: '', focalLength: '', aperture: '', iso: '', date: '', shutterCount: 0, serial: '', gps: '' };
+}
+
+// ===================== PHOTO EXIF =====================
 async function readExif(file) {
   const buffer = await file.arrayBuffer();
   const tags = ExifReader.load(buffer);
@@ -135,14 +160,7 @@ async function readExif(file) {
   const aperture = tags['FNumber']?.description || '';
   const iso = tags['ISOSpeedRatings']?.description || '';
 
-  let date = '';
-  if (tags['DateTimeOriginal']) {
-    const d = tags['DateTimeOriginal'].description;
-    if (d && d.length >= 10) {
-      const parts = d.split(/[:\s]/);
-      date = `${parts[0]}-${parts[1]}-${parts[2]}`;
-    }
-  }
+  let date = extractDate(tags['DateTimeOriginal']?.description || '');
 
   let shutterCount = 0;
   const scTags = ['ImageCount', 'ShutterCount', 'TotalShutterReleases', 'ImageCount2'];
@@ -172,6 +190,63 @@ async function readExif(file) {
   return { camera, cameraMake: make, lens, focalLength: focalNum ? `${Math.round(focalNum)}mm` : '', aperture: aperture ? `f/${aperture}` : '', iso, date, shutterCount, serial, gps };
 }
 
+// ===================== VIDEO METADATA =====================
+async function readVideoMeta(file) {
+  // Videos don't have EXIF in ExifReader, so we use file metadata
+  let date = '';
+
+  // Try to extract date from filename (common patterns)
+  const nameDate = extractDateFromFilename(file.name);
+  if (nameDate) {
+    date = nameDate;
+  } else if (file.lastModified) {
+    // Fall back to file modification date
+    const d = new Date(file.lastModified);
+    date = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+
+  // Try to detect camera from filename patterns
+  let camera = 'Video';
+  const lowerName = file.name.toLowerCase();
+  if (lowerName.includes('gopro')) camera = 'GoPro';
+  else if (lowerName.includes('dji')) camera = 'DJI';
+  else if (lowerName.includes('insta')) camera = 'Insta360';
+  else if (lowerName.includes('iphone')) camera = 'iPhone';
+  else if (lowerName.includes('pixel')) camera = 'Pixel';
+  else if (lowerName.includes('sony')) camera = 'Sony';
+  else if (lowerName.includes('fuji') || lowerName.includes('xt-')) camera = 'Fujifilm';
+  else if (lowerName.includes('leica')) camera = 'Leica';
+
+  return { camera, cameraMake: '', lens: '', focalLength: '', aperture: '', iso: '', date, shutterCount: 0, serial: '', gps: '' };
+}
+
+function extractDateFromFilename(filename) {
+  // Match patterns like: IMG_20240315_123456, 2024-03-15, VID_20240315
+  const patterns = [
+    /(\d{4})[\-_]?(\d{2})[\-_]?(\d{2})/,           // 2024-03-15 or 20240315
+    /IMG_[EP]?(\d{4})(\d{2})(\d{2})_/,               // IMG_20240315_
+    /VID_?(\d{4})(\d{2})(\d{2})/,                     // VID_20240315
+    /(20\d{2})(\d{2})(\d{2})/,                         // 20240315 anywhere
+  ];
+  for (const re of patterns) {
+    const m = filename.match(re);
+    if (m && m[1] && m[2] && m[3]) {
+      const year = parseInt(m[1]);
+      if (year >= 2000 && year <= 2035) {
+        return `${m[1]}-${m[2]}-${m[3]}`;
+      }
+    }
+  }
+  return null;
+}
+
+function extractDate(dateStr) {
+  if (!dateStr || dateStr.length < 10) return '';
+  const parts = dateStr.split(/[:\s]/);
+  return `${parts[0]}-${parts[1]}-${parts[2]}`;
+}
+
+// ===================== THUMBNAILS =====================
 async function generateThumbnail(file) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -188,10 +263,57 @@ async function generateThumbnail(file) {
   });
 }
 
+async function generateVideoThumbnail(file) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.playsInline = true;
+    video.muted = true;
+    video.crossOrigin = 'anonymous';
+
+    video.onloadedmetadata = () => {
+      // Seek to 1 second or 10% of duration
+      video.currentTime = Math.min(1, video.duration * 0.1);
+    };
+
+    video.onseeked = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 200;
+      canvas.height = 150;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, 200, 150);
+
+      // Draw play indicator overlay
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.beginPath();
+      ctx.arc(100, 75, 20, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.moveTo(94, 65);
+      ctx.lineTo(94, 85);
+      ctx.lineTo(112, 75);
+      ctx.closePath();
+      ctx.fill();
+
+      resolve(canvas.toDataURL('image/jpeg', 0.6));
+      URL.revokeObjectURL(video.src);
+    };
+
+    video.onerror = () => {
+      URL.revokeObjectURL(video.src);
+      reject(new Error('Video thumbnail failed'));
+    };
+
+    video.src = URL.createObjectURL(file);
+  });
+}
+
 // ===================== PROJECT NAME =====================
 function autoSuggestProjectName() {
-  const dates = state.photos.map(p => p.meta.date).filter(d => d).sort();
-  const cameras = [...new Set(state.photos.map(p => p.meta.camera).filter(c => c && c !== 'Unknown'))];
+  const allMedia = state.photos;
+  const dates = allMedia.map(p => p.meta.date).filter(d => d).sort();
+  const cameras = [...new Set(allMedia.map(p => p.meta.camera).filter(c => c && c !== 'Unknown'))];
 
   if (!dates.length) {
     state.projectName = `Import ${new Date().toISOString().slice(0, 10)}`;
@@ -240,7 +362,6 @@ function setupGroupingControls() {
 }
 
 function updatePresetBadge() {
-  // Find matching preset
   let match = 'custom';
   for (const [key, p] of Object.entries(PRESETS)) {
     if (p.primary === state.primary && p.secondary === state.secondary) {
@@ -269,55 +390,64 @@ function updateTreePreview() {
   if (state.primary === 'date') {
     const dates = [...new Set(selected.map(p => p.meta.date).filter(d => d))].sort();
     for (const date of dates) {
-      lines.push(`  <span class="indent">└──</span> <span class="folder">${date}/</span>`);
-      const dayPhotos = selected.filter(p => p.meta.date === date);
+      lines.push(`  <span class="indent">\u2514\u2500\u2500</span> <span class="folder">${date}/</span>`);
+      const dayMedia = selected.filter(p => p.meta.date === date);
       if (state.secondary === 'camera') {
-        const cams = [...new Set(dayPhotos.map(p => p.meta.camera))];
+        const cams = [...new Set(dayMedia.map(p => p.meta.camera))];
         for (let ci = 0; ci < cams.length; ci++) {
           const isLast = ci === cams.length - 1;
-          lines.push(`  <span class="indent">    ${isLast ? '└──' : '├──'}</span> <span class="folder">${escapeHtml(cams[ci])}/</span>`);
-          dayPhotos.filter(p => p.meta.camera === cams[ci]).slice(0, 2).forEach(f =>
-            lines.push(`  <span class="indent">    ${isLast ? '    ' : '│   '}├──</span> <span class="file">${escapeHtml(f.name)}</span>`)
+          lines.push(`  <span class="indent">    ${isLast ? '\u2514\u2500\u2500' : '\u251c\u2500\u2500'}</span> <span class="folder">${escapeHtml(cams[ci])}/</span>`);
+          dayMedia.filter(p => p.meta.camera === cams[ci]).slice(0, 2).forEach(f =>
+            lines.push(`  <span class="indent">    ${isLast ? '    ' : '\u2502   '}\u251c\u2500\u2500</span> <span class="file">${escapeHtml(f.name)}</span>`)
           );
-          const more = dayPhotos.filter(p => p.meta.camera === cams[ci]).length - 2;
-          if (more > 0) lines.push(`  <span class="indent">    ${isLast ? '    ' : '│   '}└──</span> <span class="file">+${more} more</span>`);
+          const more = dayMedia.filter(p => p.meta.camera === cams[ci]).length - 2;
+          if (more > 0) lines.push(`  <span class="indent">    ${isLast ? '    ' : '\u2502   '}\u2514\u2500\u2500</span> <span class="file">+${more} more</span>`);
         }
       } else {
-        dayPhotos.slice(0, 3).forEach(f =>
-          lines.push(`  <span class="indent">    ├──</span> <span class="file">${escapeHtml(f.name)}</span>`)
+        dayMedia.slice(0, 3).forEach(f =>
+          lines.push(`  <span class="indent">    \u251c\u2500\u2500</span> <span class="file">${escapeHtml(f.name)}</span>`)
         );
-        if (dayPhotos.length > 3) lines.push(`  <span class="indent">    └──</span> <span class="file">+${dayPhotos.length - 3} more</span>`);
+        if (dayMedia.length > 3) lines.push(`  <span class="indent">    \u2514\u2500\u2500</span> <span class="file">+${dayMedia.length - 3} more</span>`);
       }
     }
   } else if (state.primary === 'camera') {
     const cams = [...new Set(selected.map(p => p.meta.camera).filter(c => c !== 'Unknown'))];
     for (const cam of cams) {
-      lines.push(`  <span class="indent">└──</span> <span class="folder">${escapeHtml(cam)}/</span>`);
-      const camPhotos = selected.filter(p => p.meta.camera === cam);
+      lines.push(`  <span class="indent">\u2514\u2500\u2500</span> <span class="folder">${escapeHtml(cam)}/</span>`);
+      const camMedia = selected.filter(p => p.meta.camera === cam);
       if (state.secondary === 'date') {
-        const dates = [...new Set(camPhotos.map(p => p.meta.date))].sort();
+        const dates = [...new Set(camMedia.map(p => p.meta.date))].sort();
         for (const date of dates) {
-          lines.push(`  <span class="indent">    ├──</span> <span class="folder">${date}/</span>`);
-          camPhotos.filter(p => p.meta.date === date).slice(0, 2).forEach(f =>
-            lines.push(`  <span class="indent">    │   ├──</span> <span class="file">${escapeHtml(f.name)}</span>`)
+          lines.push(`  <span class="indent">    \u251c\u2500\u2500</span> <span class="folder">${date}/</span>`);
+          camMedia.filter(p => p.meta.date === date).slice(0, 2).forEach(f =>
+            lines.push(`  <span class="indent">    \u2502   \u251c\u2500\u2500</span> <span class="file">${escapeHtml(f.name)}</span>`)
           );
         }
       } else {
-        camPhotos.slice(0, 4).forEach(f =>
-          lines.push(`  <span class="indent">    ├──</span> <span class="file">${escapeHtml(f.name)}</span>`)
+        camMedia.slice(0, 4).forEach(f =>
+          lines.push(`  <span class="indent">    \u251c\u2500\u2500</span> <span class="file">${escapeHtml(f.name)}</span>`)
         );
-        if (camPhotos.length > 4) lines.push(`  <span class="indent">    └──</span> <span class="file">+${camPhotos.length - 4} more</span>`);
+        if (camMedia.length > 4) lines.push(`  <span class="indent">    \u2514\u2500\u2500</span> <span class="file">+${camMedia.length - 4} more</span>`);
       }
     }
   } else {
     selected.slice(0, 8).forEach(f =>
-      lines.push(`  <span class="indent">├──</span> <span class="file">${escapeHtml(f.name)}</span>`)
+      lines.push(`  <span class="indent">\u251c\u2500\u2500</span> <span class="file">${escapeHtml(f.name)}</span>`)
     );
-    if (selected.length > 8) lines.push(`  <span class="indent">└──</span> <span class="file">+${selected.length - 8} more</span>`);
+    if (selected.length > 8) lines.push(`  <span class="indent">\u2514\u2500\u2500</span> <span class="file">+${selected.length - 8} more</span>`);
   }
 
   $('#treePreview').innerHTML = lines.join('\n');
-  $('#photoCount').textContent = `${selected.length} photos · ${[...new Set(selected.map(p => p.meta.date))].filter(d => d).length} days · ${[...new Set(selected.map(p => p.meta.camera))].filter(c => c !== 'Unknown').length} cameras`;
+
+  const imgCount = selected.filter(p => p.type === 'image').length;
+  const vidCount = selected.filter(p => p.type === 'video').length;
+  const counts = [];
+  counts.push(`${selected.length} files`);
+  if (imgCount) counts.push(`${imgCount} photos`);
+  if (vidCount) counts.push(`${vidCount} videos`);
+  counts.push(`${[...new Set(selected.map(p => p.meta.date))].filter(d => d).length} days`);
+  counts.push(`${[...new Set(selected.map(p => p.meta.camera))].filter(c => c !== 'Unknown').length} sources`);
+  $('#photoCount').textContent = counts.join(' \u00b7 ');
 }
 
 function escapeHtml(t) {
@@ -338,18 +468,29 @@ function renderPhotoGrid() {
 
     const thumb = photo.thumb
       ? `<img src="${photo.thumb}" alt="">`
-      : `<div class="placeholder">📷</div>`;
+      : (photo.type === 'video' ? '<div class="placeholder">\ud83c\udfa5</div>' : '<div class="placeholder">\ud83d\udcf7</div>');
 
     const camColor = photo.meta.cameraMake === 'Leica' ? 'var(--gold)' : photo.meta.cameraMake === 'Fujifilm' ? 'var(--brown)' : 'var(--text2)';
 
+    // Video badge
+    const videoBadge = photo.type === 'video'
+      ? '<div class="video-badge">\u25b6</div>'
+      : '';
+
+    // Show different info for videos vs photos
+    const metaLines = photo.type === 'video'
+      ? `<div class="photo-meta" style="color: var(--moss);">${escapeHtml(photo.meta.camera)}</div>
+         <div class="photo-meta">${photo.size} \u00b7 ${photo.meta.date || 'No date'}</div>`
+      : `<div class="photo-meta" style="color: ${camColor};">${escapeHtml(photo.meta.camera)}</div>
+         <div class="photo-meta">${photo.meta.focalLength} ${photo.meta.aperture} \u00b7 ISO ${photo.meta.iso}</div>
+         <div class="photo-meta">${photo.meta.date || 'No date'} \u00b7 SC: ${photo.meta.shutterCount || '?'}</div>`;
+
     div.innerHTML = `
-      <div class="photo-thumb">${thumb}</div>
-      <div class="photo-check">✓</div>
+      <div class="photo-thumb">${thumb}${videoBadge}</div>
+      <div class="photo-check">\u2713</div>
       <div class="photo-info">
         <div class="photo-name">${escapeHtml(photo.name)}</div>
-        <div class="photo-meta" style="color: ${camColor};">${escapeHtml(photo.meta.camera)}</div>
-        <div class="photo-meta">${photo.meta.focalLength} ${photo.meta.aperture} · ISO ${photo.meta.iso}</div>
-        <div class="photo-meta">${photo.meta.date || 'No date'} · SC: ${photo.meta.shutterCount || '?'}</div>
+        ${metaLines}
       </div>
     `;
     grid.appendChild(div);
@@ -379,13 +520,19 @@ function deselectAll() {
 }
 
 function updateSelectedCount() {
-  $('#selectedCount').textContent = state.selected.size;
+  const selected = state.photos.filter(p => state.selected.has(p.id));
+  const imgs = selected.filter(p => p.type === 'image').length;
+  const vids = selected.filter(p => p.type === 'video').length;
+  const parts = [`${selected.length} selected`];
+  if (imgs) parts.push(`${imgs} photos`);
+  if (vids) parts.push(`${vids} videos`);
+  $('#selectedCount').textContent = parts.join(' \u00b7 ');
 }
 
 // ===================== ORGANIZE =====================
 async function organize() {
   const selected = state.photos.filter(p => state.selected.has(p.id));
-  if (!selected.length) { toast('No photos selected', 'error'); return; }
+  if (!selected.length) { toast('No files selected', 'error'); return; }
 
   $('#bottomBar').classList.add('hidden');
   showStep('process');
@@ -395,30 +542,29 @@ async function organize() {
   const total = selected.length;
 
   for (let i = 0; i < selected.length; i++) {
-    const photo = selected[i];
-    updateProgress(Math.round((i / total) * 100), `Organizing ${photo.name}...`);
+    const item = selected[i];
+    updateProgress(Math.round((i / total) * 100), `Adding ${item.name}...`);
 
-    // Build path
+    // Build path (same logic for photos and videos)
     let path = project;
-    if (state.primary === 'date' && photo.meta.date) {
-      path += `/${photo.meta.date}`;
-      if (state.secondary === 'camera' && photo.meta.camera !== 'Unknown') {
-        path += `/${sanitize(photo.meta.camera)}`;
+    if (state.primary === 'date' && item.meta.date) {
+      path += `/${item.meta.date}`;
+      if (state.secondary === 'camera' && item.meta.camera !== 'Unknown') {
+        path += `/${sanitize(item.meta.camera)}`;
       }
-    } else if (state.primary === 'camera' && photo.meta.camera !== 'Unknown') {
-      path += `/${sanitize(photo.meta.camera)}`;
-      if (state.secondary === 'date' && photo.meta.date) {
-        path += `/${photo.meta.date}`;
+    } else if (state.primary === 'camera' && item.meta.camera !== 'Unknown') {
+      path += `/${sanitize(item.meta.camera)}`;
+      if (state.secondary === 'date' && item.meta.date) {
+        path += `/${item.meta.date}`;
       }
-    } else if (state.primary === 'location' && photo.meta.gps) {
-      path += `/${photo.meta.gps.replace(/[,\s]/g, '_')}`;
+    } else if (state.primary === 'location' && item.meta.gps) {
+      path += `/${item.meta.gps.replace(/[,\s]/g, '_')}`;
     }
 
     const folder = zip.folder(path);
-    const blob = await photo.file.arrayBuffer();
-    folder.file(photo.name, blob);
+    const blob = await item.file.arrayBuffer();
+    folder.file(item.name, blob);
 
-    // Small delay for UI
     await new Promise(r => setTimeout(r, 10));
   }
 
@@ -426,11 +572,14 @@ async function organize() {
   const content = await zip.generateAsync({ type: 'blob' });
 
   // Save project to history
+  const imgCount = selected.filter(p => p.type === 'image').length;
+  const vidCount = selected.filter(p => p.type === 'video').length;
   const projectEntry = {
     id: Date.now().toString(),
     name: project,
     date: new Date().toISOString().slice(0, 10),
-    photos: selected.length,
+    photos: imgCount,
+    videos: vidCount,
     cameras: [...new Set(selected.map(p => p.meta.camera).filter(c => c !== 'Unknown'))],
     days: [...new Set(selected.map(p => p.meta.date).filter(d => d))].length,
   };
@@ -441,7 +590,8 @@ async function organize() {
 
   // Show done
   showStep('done');
-  $('#doneText').textContent = `${selected.length} photos organized into "${project}" and ready for export.`;
+  const parts = [`${imgCount} photos`, `${vidCount} videos`];
+  $('#doneText').textContent = `${parts.join(' and ')} organized into "${project}" and ready for export.`;
 
   // Setup download
   const safeName = sanitize(project).replace(/\s+/g, '_') + '.zip';
@@ -454,7 +604,7 @@ async function organize() {
 }
 
 function sanitize(name) {
-  return name.replace(/[<>:"/\\|?*]/g, '_').replace(/\.{2,}/g, '.').trim().slice(0, 100) || 'Unknown';
+  return name.replace(/[<>"/\\|?*]/g, '_').replace(/\.{2,}/g, '.').trim().slice(0, 100) || 'Unknown';
 }
 
 // ===================== STEPS =====================
@@ -482,16 +632,16 @@ function reset() {
 
 // ===================== DASHBOARD =====================
 function renderDashboard() {
-  // Stats
-  const totalPhotos = state.projects.reduce((a, p) => a + p.photos, 0);
+  const totalFiles = state.projects.reduce((a, p) => a + (p.photos || 0) + (p.videos || 0), 0);
+  const totalVideos = state.projects.reduce((a, p) => a + (p.videos || 0), 0);
   const thisMonth = state.projects
     .filter(p => p.date.startsWith(new Date().toISOString().slice(0, 7)))
-    .reduce((a, p) => a + p.photos, 0);
+    .reduce((a, p) => a + (p.photos || 0) + (p.videos || 0), 0);
 
-  $('#dashPhotos').textContent = totalPhotos.toLocaleString();
+  $('#dashPhotos').textContent = totalFiles.toLocaleString();
+  $('#dashVideos').textContent = totalVideos.toLocaleString();
   $('#dashCameras').textContent = state.cameras.length;
   $('#dashProjects').textContent = state.projects.length;
-  $('#dashThisMonth').textContent = thisMonth.toLocaleString();
 
   // Cameras
   const camList = $('#cameraList');
@@ -507,10 +657,10 @@ function renderDashboard() {
       div.className = 'camera-card';
       div.innerHTML = `
         <div class="camera-header">
-          <div class="camera-icon" style="background: ${cam.color}15; color: ${cam.color};">📷</div>
+          <div class="camera-icon" style="background: ${cam.color}15; color: ${cam.color};">\ud83d\udcf7</div>
           <div style="flex:1; min-width:0;">
             <div class="camera-name">${escapeHtml(cam.nickname || cam.model)}</div>
-            <div class="camera-model">${escapeHtml(cam.model)} · ${cam.id.slice(0, 8)}...</div>
+            <div class="camera-model">${escapeHtml(cam.model)} \u00b7 ${cam.id.slice(0, 8)}...</div>
           </div>
         </div>
         <div class="camera-stats">
@@ -547,12 +697,16 @@ function renderDashboard() {
     state.projects.slice(0, 10).forEach(proj => {
       const div = document.createElement('div');
       div.className = 'project-card';
+      const parts = [];
+      parts.push(`\ud83d\udcc5 ${proj.date}`);
+      if (proj.photos) parts.push(`\ud83d\uddbc ${proj.photos} photos`);
+      if (proj.videos) parts.push(`\ud83c\udfa5 ${proj.videos} videos`);
+      parts.push(`\ud83d\udcc6 ${proj.days} day${proj.days > 1 ? 's' : ''}`);
+
       div.innerHTML = `
         <div class="project-name">${escapeHtml(proj.name)}</div>
         <div class="project-meta">
-          <span>📅 ${proj.date}</span>
-          <span>🖼 ${proj.photos} photos</span>
-          <span>📆 ${proj.days} day${proj.days > 1 ? 's' : ''}</span>
+          ${parts.map(p => `<span>${p}</span>`).join('')}
         </div>
         <div class="project-tags">
           ${proj.cameras.map(c => `<span class="tag ${c.includes('Leica') ? 'tag-leica' : c.includes('Fuji') ? 'tag-fuji' : 'tag-indigo'}">${escapeHtml(c)}</span>`).join('')}
@@ -611,7 +765,15 @@ function loadState() {
     const cams = localStorage.getItem('photoOrg_cameras');
     if (cams) state.cameras = JSON.parse(cams);
     const projs = localStorage.getItem('photoOrg_projects');
-    if (projs) state.projects = JSON.parse(projs);
+    if (projs) {
+      const parsed = JSON.parse(projs);
+      // Migrate old projects without video count
+      state.projects = parsed.map(p => ({
+        ...p,
+        photos: p.photos || 0,
+        videos: p.videos || 0,
+      }));
+    }
     const prim = localStorage.getItem('photoOrg_primary');
     if (prim) { state.primary = prim; $('#primaryGroup').value = prim; $('#defaultPrimary').value = prim; }
     const sec = localStorage.getItem('photoOrg_secondary');
@@ -623,7 +785,8 @@ function loadState() {
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
 }
 
 function toast(message, type = 'info') {

@@ -255,6 +255,20 @@ body {
   transition: all 0.15s;
 }
 .photo-card.selected .photo-check { background: var(--indigo); border-color: var(--indigo); color: white; }
+.video-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(26,25,23,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--text);
+}
 
 /* === Form Elements === */
 input[type="text"], select {
@@ -387,13 +401,13 @@ input[type="text"]:focus, select:focus { border-color: var(--indigo); }
       <!-- Step 1: Select Photos -->
       <div id="step-select">
         <div class="file-input-wrapper btn btn-primary btn-block" style="margin-bottom: 16px;">
-          <input type="file" id="photoInput" multiple accept="image/*,.dng,.raf,.cr2,.cr3,.nef,.arw,.orf,.rw2">
-          <span>📷 Select Photos from Library</span>
+          <input type="file" id="photoInput" multiple accept="image/*,video/*,.dng,.raf,.cr2,.cr3,.nef,.arw,.orf,.rw2,.mp4,.mov,.m4v,.avi,.mkv">
+          <span>📷 Select Photos & Videos</span>
         </div>
         <div class="empty-state">
           <div class="icon">📁</div>
-          <h3>Import Your Photos</h3>
-          <p>Select photos from your camera roll, SD card reader, or Files app. The organizer will read EXIF metadata and create a clean project structure.</p>
+          <h3>Import Your Photos & Videos</h3>
+          <p>Select photos and videos from your camera roll, SD card reader, or Files app. Photos get EXIF metadata read, videos are organized by file date. Everything goes into one clean project structure.</p>
         </div>
       </div>
 
@@ -436,10 +450,10 @@ input[type="text"]:focus, select:focus { border-color: var(--indigo); }
       <div id="step-process" class="hidden">
         <div class="empty-state">
           <div class="icon">📦</div>
-          <h3>Organizing Photos...</h3>
+          <h3>Organizing Photos & Videos...</h3>
           <div class="progress-container">
             <div class="progress-bar"><div class="progress-fill" id="processBar" style="width: 0%"></div></div>
-            <div class="progress-text" id="processText">Reading EXIF metadata...</div>
+            <div class="progress-text" id="processText">Reading metadata...</div>
           </div>
         </div>
       </div>
@@ -453,6 +467,9 @@ input[type="text"]:focus, select:focus { border-color: var(--indigo); }
           <button class="btn btn-primary btn-block" style="margin-top: 20px;" id="downloadBtn">
             📥 Download Organized ZIP
           </button>
+          <div style="font-size: 11px; color: var(--text2); margin-top: 10px; text-align: center;">
+            Photos + Videos in one ZIP
+          </div>
           <button class="btn btn-secondary btn-block" style="margin-top: 10px;" onclick="app.reset()">
             Organize More Photos
           </button>
@@ -463,10 +480,10 @@ input[type="text"]:focus, select:focus { border-color: var(--indigo); }
     <!-- DASHBOARD TAB -->
     <div id="tab-dashboard" class="hidden">
       <div class="stats-grid">
-        <div class="stat-card"><div class="stat-value" style="color: var(--indigo);" id="dashPhotos">0</div><div class="stat-label">Photos</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: var(--indigo);" id="dashPhotos">0</div><div class="stat-label">Files</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: var(--moss);" id="dashVideos">0</div><div class="stat-label">Videos</div></div>
         <div class="stat-card"><div class="stat-value" style="color: var(--wood);" id="dashCameras">0</div><div class="stat-label">Cameras</div></div>
-        <div class="stat-card"><div class="stat-value" style="color: var(--moss);" id="dashProjects">0</div><div class="stat-label">Projects</div></div>
-        <div class="stat-card"><div class="stat-value" style="color: var(--vermilion);" id="dashThisMonth">0</div><div class="stat-label">This Month</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: var(--vermilion);" id="dashProjects">0</div><div class="stat-label">Projects</div></div>
       </div>
 
       <div class="card-title" style="margin-bottom: 10px;">Your Cameras</div>
@@ -503,8 +520,8 @@ input[type="text"]:focus, select:focus { border-color: var(--indigo); }
       <div class="card">
         <div class="card-title">About</div>
         <p style="font-size: 12px; color: var(--text2); line-height: 1.6;">
-          Photo Organizer reads EXIF metadata from your photos and creates a single clean project folder structure.
-          All processing happens on your device — photos are never uploaded to any server.
+          Photo Organizer reads EXIF metadata from your photos and organizes both photos & videos into a single clean project folder structure.
+          All processing happens on your device — nothing is ever uploaded to any server.
           Export the organized ZIP to iCloud Drive, Dropbox, or any cloud storage.
         </p>
       </div>
