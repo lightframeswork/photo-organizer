@@ -151,7 +151,7 @@ input[type="text"]:focus, select:focus { border-color:var(--indigo); }
     <div class="header-top">
       <div>
         <div class="header-title">Photo Organizer</div>
-        <div class="header-sub">Photos + Videos &middot; v2.1 &middot; 1 copy per file</div>
+        <div class="header-sub">Photos + Videos &middot; v2.1b &middot; 1 copy per file</div>
       </div>
     </div>
     <div class="nav-tabs">
@@ -229,7 +229,7 @@ input[type="text"]:focus, select:focus { border-color:var(--indigo); }
         <div class="empty-state">
           <div class="icon">&#128230;</div>
           <h3>Organizing...</h3>
-          <p style="font-size:12px;color:var(--text2);margin-top:8px;">Keep this screen active</p>
+          <p style="font-size:12px;color:var(--vermilion);margin-top:8px;font-weight:600;">&#9888; Keep this screen active &mdash; don't switch apps</p>
           <div class="progress-container">
             <div class="progress-bar"><div class="progress-fill" id="processBar" style="width:0%"></div></div>
             <div class="progress-text" id="processText">Starting...</div>
@@ -281,8 +281,10 @@ input[type="text"]:focus, select:focus { border-color:var(--indigo); }
       <div class="card">
         <div class="card-title">Tips</div>
         <p style="font-size:12px;color:var(--text2);line-height:1.6;">
-          Keep the screen active during import &mdash; iOS may pause background tabs.<br><br>
-          For large batches (20+ videos), import in smaller groups using the + button.<br><br>
+          <strong style="color:var(--vermilion);">&#9888; Important for iOS:</strong><br>
+          Keep the screen ON during import. iOS kills background apps.<br><br>
+          <strong>For many videos:</strong> Import in groups of 10 using the + button. Each video loads in ~2 seconds.<br><br>
+          <strong>What takes time:</strong> iOS prepares video files before giving them to the app. This is normal and cannot be skipped.<br><br>
           All processing happens on-device. Nothing is uploaded anywhere.
         </p>
       </div>
